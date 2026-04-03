@@ -1,6 +1,15 @@
-# 网站图片上传助手
+# 网站图片上传
 
-Tampermonkey 油猴脚本，用于电商网站商品图片的批量上传。
+## 项目概述
+
+Tampermonkey 油猴脚本，用于 SZ (ShowZ Store) 和 GD (GundamIT) 电商网站后台的商品图片批量上传。
+
+## 核心文件
+
+| 文件 | 说明 |
+|------|------|
+| `图片上传脚本.user.js` | 当前版本（V3.3） |
+| `图片上传脚本-v1.5-初始版.user.js` | 初始版本存档 |
 
 ## 功能
 
@@ -17,21 +26,9 @@ Tampermonkey 油猴脚本，用于电商网站商品图片的批量上传。
 - JPEG 质量 90%（体积小，上传快）
 - 自动叠加分平台 Logo 水印（左下角）
 - 处理期间显示遮罩提示
-- **V3.3**：自动识别详情图对话框（URL 含 `save=_Detail` / `Description`），跳过主图处理，避免详情图被误处理为正方形
+- **V3.3**：自动识别详情图对话框，跳过主图处理
 
 ## 支持平台
 
 - GundamIT (`gundamit.com`)
 - ShowzStore (`showzstore.com`)
-
-## 安装
-
-1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 将 `图片上传脚本.user.js` 导入 Tampermonkey
-
-## 文件说明
-
-| 文件 | 说明 |
-|------|------|
-| `图片上传脚本.user.js` | 当前版本（V3.3） |
-| `图片上传脚本-v1.5-初始版.user.js` | 初始版本存档 |

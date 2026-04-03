@@ -1,20 +1,23 @@
 // ==UserScript==
-// @name         图片上传助手 (V3.1 图片缩放+分平台Logo水印)
+// @name         图片上传助手 (V3.3 图片缩放+分平台Logo水印+主图水印)
 // @namespace    http://tampermonkey.net/
-// @version      3.1
-// @description  上传图片前统一缩放到850宽（可选放大）并叠加Logo水印 + Alt/Title注入
+// @version      3.3
+// @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印
 // @author       You
 // @match        https://*.gundamit.com/manage/?m=products&a=products&d=edit*
 // @match        https://*.showzstore.com/manage/?m=products&a=products&d=edit*
+// @match        https://*.gundamit.com/manage/?m=set&a=photo*
+// @match        https://*.showzstore.com/manage/?m=set&a=photo*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "3.1";
+  const SCRIPT_VERSION = "3.3";
 
   // ================= 配置区域 =================
   const maxConcurrentUploads = 3;
@@ -28,6 +31,10 @@
   const LOGO_OPACITY = 1.0;
   const LOGO_MARGIN = 5;
   const LOGO_POS = "bl";
+
+  // ===== 主图专用配置 =====
+  const MAIN_IMAGE_SIZE = 500;
+  const MAIN_IMAGE_QUALITY = 0.9;
   // ===========================================
 
   let currentUploads = 0;
@@ -236,6 +243,144 @@
     return { blob, name: `${base}-w${IMAGE_MAX_WIDTH}.${ext}` };
   }
 
+  // ===== 主图专用预处理：强制正方形 + 水印 =====
+  async function preprocessMainImage(file) {
+    if ((file.type || "").toLowerCase() === "image/gif") {
+      return { blob: file, name: file.name };
+    }
+
+    const bitmapOrImg = await loadImageFromFile(file);
+    const srcW = bitmapOrImg.width;
+    const srcH = bitmapOrImg.height;
+
+    const squareSize = MAIN_IMAGE_SIZE;
+
+    const scale = Math.min(squareSize / srcW, squareSize / srcH);
+    const scaledW = Math.round(srcW * scale);
+    const scaledH = Math.round(srcH * scale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = squareSize;
+    canvas.height = squareSize;
+
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, squareSize, squareSize);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    const offsetX = Math.round((squareSize - scaledW) / 2);
+    const offsetY = Math.round((squareSize - scaledH) / 2);
+    ctx.drawImage(bitmapOrImg, offsetX, offsetY, scaledW, scaledH);
+
+    const logo = await getLogoImage();
+    if (logo) {
+      const targetLogoW = Math.round(squareSize * LOGO_REL_WIDTH);
+      const logoScale = targetLogoW / logo.width;
+      const targetLogoH = Math.round(logo.height * logoScale);
+      const { x, y } = pickLogoAnchor(LOGO_POS, squareSize, squareSize, targetLogoW, targetLogoH, LOGO_MARGIN);
+      ctx.save();
+      ctx.globalAlpha = LOGO_OPACITY;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(logo, x, y, targetLogoW, targetLogoH);
+      ctx.restore();
+    }
+
+    const blob = await canvasToBlob(canvas, OUTPUT_MIME, MAIN_IMAGE_QUALITY);
+    if (!blob) return { blob: file, name: file.name };
+
+    const base = (file.name || "image").replace(/\.[^.]+$/, "");
+    const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
+    return { blob, name: `${base}-sq${squareSize}.${ext}` };
+  }
+
+  // ================= iframe 模式：仅 hook 主图上传 iframe 的 XHR =================
+  if (window !== window.top) {
+    const iframeUrl = window.location.href;
+
+    if (iframeUrl.includes('save=_Detail') || iframeUrl.includes('save=_detail') || iframeUrl.includes('Description')) {
+      log('iframe 模式：详情图对话框，跳过主图处理，URL:', iframeUrl);
+      return;
+    }
+
+    const _iframeWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const _origSend = _iframeWin.XMLHttpRequest.prototype.send;
+    const _IframeFormData = _iframeWin.FormData;
+    const _IframeFile = _iframeWin.File;
+
+    _iframeWin.XMLHttpRequest.prototype.send = function (data) {
+      const xhr = this;
+
+      if (!(data instanceof _IframeFormData)) {
+        return _origSend.call(xhr, data);
+      }
+
+      let hasImage = false;
+      const entries = [];
+      try {
+        for (const pair of data.entries()) {
+          entries.push(pair);
+          const v = pair[1];
+          if (
+            v && v.size !== undefined &&
+            (v.type || '').startsWith('image/') &&
+            (v.type || '').toLowerCase() !== 'image/gif'
+          ) {
+            hasImage = true;
+          }
+        }
+      } catch (e) {
+        return _origSend.call(xhr, data);
+      }
+
+      if (!hasImage) {
+        return _origSend.call(xhr, data);
+      }
+
+      let overlay = null;
+      try {
+        const topDoc = (_iframeWin.top || _iframeWin).document;
+        overlay = topDoc.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        const msg = topDoc.createElement('div');
+        msg.style.cssText = 'background:#fff;padding:20px 40px;border-radius:8px;font-size:16px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        msg.textContent = '正在处理主图（正方形+水印）...';
+        overlay.appendChild(msg);
+        topDoc.body.appendChild(overlay);
+      } catch (e) { overlay = null; }
+
+      (async () => {
+        try {
+          const newFormData = new _IframeFormData();
+          for (const [key, value] of entries) {
+            if (
+              value && value.size !== undefined &&
+              (value.type || '').startsWith('image/')
+            ) {
+              const processed = await preprocessMainImage(value);
+              const newFile = new _IframeFile(
+                [processed.blob], processed.name, { type: processed.blob.type }
+              );
+              newFormData.append(key, newFile);
+              log(`主图iframe拦截(正方形+水印): ${value.name} → ${processed.name}`);
+            } else {
+              newFormData.append(key, value);
+            }
+          }
+          _origSend.call(xhr, newFormData);
+        } catch (err) {
+          log('主图iframe拦截失败，发送原始文件:', err);
+          _origSend.call(xhr, data);
+        } finally {
+          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+      })();
+    };
+
+    log('iframe 模式：XHR hook 已启动，页面:', window.location.href);
+    return;
+  }
+
   // ================= UI 构建 =================
   const uploadSpan = document.createElement("div");
   uploadSpan.className = 'input';
@@ -344,6 +489,7 @@
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', postUrl, true);
+    xhr._skipWatermark = true;
     xhr.setRequestHeader("accept", "application/json, text/javascript, */*; q=0.01");
     xhr.setRequestHeader("x-requested-with", "XMLHttpRequest");
 
@@ -420,5 +566,7 @@
     const textareaElement = document.querySelector('#cke_1_contents > textarea') || document.querySelector('#Description_en');
     if (textareaElement) textareaElement.value += htmlContent;
   }
+
+  log('主页面模式已加载');
 
 })();
