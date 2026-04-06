@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         图片上传助手 (V3.3 图片缩放+分平台Logo水印+主图水印)
+// @name         图片上传助手 (V3.4 图片缩放+分平台Logo水印+主图水印)
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.4
 // @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印
 // @author       You
 // @match        https://*.gundamit.com/manage/?m=products&a=products&d=edit*
@@ -275,7 +275,8 @@
 
     const logo = await getLogoImage();
     if (logo) {
-      const targetLogoW = Math.round(squareSize * LOGO_REL_WIDTH);
+      const mainLogoRelWidth = 0.35;
+      const targetLogoW = Math.round(squareSize * mainLogoRelWidth);
       const logoScale = targetLogoW / logo.width;
       const targetLogoH = Math.round(logo.height * logoScale);
       const { x, y } = pickLogoAnchor(LOGO_POS, squareSize, squareSize, targetLogoW, targetLogoH, LOGO_MARGIN);
