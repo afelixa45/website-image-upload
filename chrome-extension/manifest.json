@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "图片上传助手",
+  "version": "3.5",
+  "description": "ShowzStore/GundamIT 后台图片上传前自动缩放+Logo水印+Alt/Title注入+主图正方形处理",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.gundamit.com/manage/?m=products&a=products&d=edit*",
+        "https://*.showzstore.com/manage/?m=products&a=products&d=edit*",
+        "https://*.gundamit.com/manage/?m=set&a=photo*",
+        "https://*.showzstore.com/manage/?m=set&a=photo*"
+      ],
+      "js": ["inject-logos.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*.gundamit.com/manage/?m=products&a=products&d=edit*",
+        "https://*.showzstore.com/manage/?m=products&a=products&d=edit*",
+        "https://*.gundamit.com/manage/?m=set&a=photo*",
+        "https://*.showzstore.com/manage/?m=set&a=photo*"
+      ],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["logos/SZ_logo.png", "logos/GD_logo.png"],
+      "matches": [
+        "https://*.gundamit.com/*",
+        "https://*.showzstore.com/*"
+      ]
+    }
+  ]
+}

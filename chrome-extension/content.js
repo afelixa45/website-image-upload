@@ -1,26 +1,7 @@
-// ==UserScript==
-// @name         图片上传助手 (V3.6 图片缩放+分平台Logo水印+主图水印)
-// @namespace    http://tampermonkey.net/
-// @version      3.6
-// @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印
-// @author       You
-// @match        https://*.gundamit.com/manage/?m=products&a=products&d=edit*
-// @match        https://*.showzstore.com/manage/?m=products&a=products&d=edit*
-// @match        https://*.gundamit.com/manage/?m=set&a=photo*
-// @match        https://*.showzstore.com/manage/?m=set&a=photo*
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_registerMenuCommand
-// @grant        GM_getResourceURL
-// @grant        unsafeWindow
-// @resource     logo_sz https://raw.githubusercontent.com/afelixa45/website-image-upload/main/logos/SZ_logo.png
-// @resource     logo_gd https://raw.githubusercontent.com/afelixa45/website-image-upload/main/logos/GD_logo.png
-// ==/UserScript==
-
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "3.6";
+  const SCRIPT_VERSION = "3.5";
 
   // ================= 配置区域 =================
   const maxConcurrentUploads = 3;
@@ -108,29 +89,15 @@
     return { x, y };
   }
 
-  // ===== Logo 按平台存储 =====
-  const PLATFORM_KEYS = {
-    "gundamit.com":   "logo_dataurl_gundamit_v1",
-    "showzstore.com": "logo_dataurl_showzstore_v1",
-  };
-
-  // ===== Logo 资源映射（通过 @resource 从 GitHub 加载）=====
-  const RESOURCE_LOGOS = {
-    "showzstore.com": "logo_sz",
-    "gundamit.com":   "logo_gd",
-  };
+  // ===== Logo 管理 =====
+  const PLATFORM_LIST = ["gundamit.com", "showzstore.com"];
 
   function getCurrentPlatform() {
     const host = window.location.hostname;
-    for (const domain of Object.keys(PLATFORM_KEYS)) {
+    for (const domain of PLATFORM_LIST) {
       if (host.endsWith(domain)) return domain;
     }
     return null;
-  }
-
-  function getLogoStoreKey() {
-    const platform = getCurrentPlatform();
-    return platform ? PLATFORM_KEYS[platform] : null;
   }
 
   function getPlatformLabel() {
@@ -147,18 +114,15 @@
     const platform = getCurrentPlatform();
     if (_logoCache && _logoCachePlatform === platform) return _logoCache;
 
-    // 优先使用用户通过面板上传的自定义 logo
-    const key = getLogoStoreKey();
-    let dataUrl = key ? await GM_getValue(key, "") : "";
+    if (!platform) return null;
 
-    // 如果没有自定义 logo，使用 @resource 预加载的 logo
-    if (!dataUrl && platform && RESOURCE_LOGOS[platform]) {
-      try {
-        dataUrl = GM_getResourceURL(RESOURCE_LOGOS[platform]);
-      } catch (e) {
-        console.error("Resource logo load failed:", e);
-      }
-    }
+    // 从桥接脚本写入的 DOM data 属性获取 logo URL
+    const root = document.documentElement;
+    const logoMap = {
+      "showzstore.com": root.dataset.logoSz || "",
+      "gundamit.com":   root.dataset.logoGd || "",
+    };
+    const dataUrl = logoMap[platform] || "";
 
     if (!dataUrl) return null;
     try {
@@ -172,45 +136,7 @@
     }
   }
 
-  function pickLogoFileAndSave() {
-    const key = getLogoStoreKey();
-    const label = getPlatformLabel();
-    if (!key) { alert("无法识别当前平台！"); return; }
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/png,image/jpeg,image/webp";
-    input.style.display = "none";
-    document.body.appendChild(input);
-
-    input.addEventListener("change", async () => {
-      const file = input.files && input.files[0];
-      if (!file) {
-        document.body.removeChild(input);
-        return;
-      }
-      try {
-        const dataUrl = await readFileAsDataURL(file);
-        await GM_setValue(key, dataUrl);
-        _logoCache = null;
-        _logoCachePlatform = null;
-        alert(`${label} 的 Logo 已保存！上传图片时会自动叠加此水印。`);
-      } catch (e) {
-        console.error(e);
-        alert("Logo 保存失败，请换一张图片再试。");
-      } finally {
-        document.body.removeChild(input);
-      }
-    });
-
-    input.click();
-  }
-
-  try {
-    const label = getPlatformLabel();
-    GM_registerMenuCommand(`设置Logo - ${label}`, pickLogoFileAndSave);
-  } catch (e) {}
-
+  // ===== 图片预处理 =====
   async function preprocessImage(file) {
     if ((file.type || "").toLowerCase() === "image/gif") {
       return { blob: file, name: file.name };
@@ -322,15 +248,12 @@
       return;
     }
 
-    const _iframeWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    const _origSend = _iframeWin.XMLHttpRequest.prototype.send;
-    const _IframeFormData = _iframeWin.FormData;
-    const _IframeFile = _iframeWin.File;
+    const _origSend = XMLHttpRequest.prototype.send;
 
-    _iframeWin.XMLHttpRequest.prototype.send = function (data) {
+    XMLHttpRequest.prototype.send = function (data) {
       const xhr = this;
 
-      if (!(data instanceof _IframeFormData)) {
+      if (!(data instanceof FormData)) {
         return _origSend.call(xhr, data);
       }
 
@@ -358,7 +281,7 @@
 
       let overlay = null;
       try {
-        const topDoc = (_iframeWin.top || _iframeWin).document;
+        const topDoc = (window.top || window).document;
         overlay = topDoc.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:99999;display:flex;align-items:center;justify-content:center;';
         const msg = topDoc.createElement('div');
@@ -370,14 +293,14 @@
 
       (async () => {
         try {
-          const newFormData = new _IframeFormData();
+          const newFormData = new FormData();
           for (const [key, value] of entries) {
             if (
               value && value.size !== undefined &&
               (value.type || '').startsWith('image/')
             ) {
               const processed = await preprocessMainImage(value);
-              const newFile = new _IframeFile(
+              const newFile = new File(
                 [processed.blob], processed.name, { type: processed.blob.type }
               );
               newFormData.append(key, newFile);
@@ -523,7 +446,9 @@
     xhr.addEventListener('load', () => {
       if (xhr.status === 200) {
         const response = JSON.parse(xhr.responseText);
+        log('上传响应:', JSON.stringify(response));
         const fileUrl = response.files[0].url;
+        log('图片URL:', fileUrl);
         filesLink.push({ name: fileName, link: fileUrl });
         progressBar.style.backgroundColor = '#4caf50';
         progressBar.innerText = 'Upload Complete';
@@ -550,42 +475,84 @@
     xhr.send(formData);
   }
 
-  // ================= 插图（alt/title） =================
+  // ================= 插入图片到编辑器 =================
   function insertImg() {
+    if (filesLink.length === 0) return;
+
     filesLink.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
 
     const titleInput = document.querySelector("input[name='Name_en']");
     const rawTitle = titleInput ? titleInput.value.trim() : "";
     const productTitle = sanitizeTitle(rawTitle);
 
-    let allImagesHtml = "";
+    let htmlStr = "";
     filesLink.forEach((file, index) => {
       let imgAttr = "";
       if (productTitle) {
         const altText = `${productTitle} - View ${index + 1}`;
         imgAttr = ` alt="${altText}" title="${altText}"`;
       }
-      allImagesHtml += `<br /><br /><img src="${file.link}"${imgAttr} />`;
+      htmlStr += `<br /><br /><img src="${file.link}"${imgAttr} />`;
     });
 
-    if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances['Description_en']) {
-      try { CKEDITOR.instances['Description_en'].insertHtml(allImagesHtml); }
-      catch (_) { fallbackInsert(allImagesHtml); }
-    } else {
-      fallbackInsert(allImagesHtml);
+    // 插入图片到编辑器
+    function tryInsert(retries) {
+      // 方式1：CKEditor API
+      if (window.CKEDITOR) {
+        for (const name in window.CKEDITOR.instances) {
+          const editor = window.CKEDITOR.instances[name];
+          editor.insertHtml(htmlStr);
+          log('通过 CKEditor 插入成功:', name);
+          return true;
+        }
+      }
+
+      // 方式2：TinyMCE API
+      if (window.tinyMCE && window.tinyMCE.activeEditor) {
+        window.tinyMCE.activeEditor.insertContent(htmlStr);
+        log('通过 TinyMCE 插入成功');
+        return true;
+      }
+
+      // 方式3：textarea
+      const ta = document.querySelector('textarea[name="Description"]');
+      if (ta) {
+        ta.value += htmlStr;
+        log('通过 textarea 插入');
+        return true;
+      }
+
+      // 方式4：iframe
+      const iframes = document.querySelectorAll('iframe');
+      for (const ifr of iframes) {
+        try {
+          const body = ifr.contentDocument && ifr.contentDocument.body;
+          if (body && body.getAttribute('contenteditable')) {
+            body.innerHTML += htmlStr;
+            log('通过 contenteditable iframe 插入成功');
+            return true;
+          }
+        } catch (e) {}
+      }
+
+      if (retries > 0) {
+        setTimeout(() => tryInsert(retries - 1), 500);
+        return false;
+      }
+
+      log('所有插入方式均失败');
+      return false;
     }
 
+    tryInsert(10);
+
+    statusText.innerText = `上传完成，共 ${filesLink.length} 张` + (productTitle ? `（Alt/Title: ${productTitle})` : '');
+    statusText.style.color = '#4caf50';
+    setTimeout(() => { statusText.innerText = ''; }, 5000);
+
     filesLink = [];
-    statusText.innerText = `图片已上传并插入（统一宽${IMAGE_MAX_WIDTH}${SCALE_UP_SMALL_IMAGES ? "，含放大" : ""}+水印）`;
-    statusText.style.color = "green";
-    setTimeout(() => { statusText.innerText = ""; }, 2500);
+    log("图片已插入编辑器，Title/Alt:", productTitle);
   }
 
-  function fallbackInsert(htmlContent) {
-    const textareaElement = document.querySelector('#cke_1_contents > textarea') || document.querySelector('#Description_en');
-    if (textareaElement) textareaElement.value += htmlContent;
-  }
-
-  log('主页面模式已加载');
-
+  log("图片上传助手已加载（Chrome Extension），平台:", getPlatformLabel());
 })();
