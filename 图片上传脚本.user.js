@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         图片上传助手 (V3.4 图片缩放+分平台Logo水印+主图水印)
+// @name         图片上传助手 (V3.5 图片缩放+分平台Logo水印+主图水印)
 // @namespace    http://tampermonkey.net/
-// @version      3.4
+// @version      3.5
 // @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印
 // @author       You
 // @match        https://*.gundamit.com/manage/?m=products&a=products&d=edit*
@@ -11,13 +11,16 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_getResourceURL
 // @grant        unsafeWindow
+// @resource     logo_sz https://raw.githubusercontent.com/afelixa45/website-image-upload/main/logos/SZ_logo.png
+// @resource     logo_gd https://raw.githubusercontent.com/afelixa45/website-image-upload/main/logos/GD_logo.png
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "3.3";
+  const SCRIPT_VERSION = "3.5";
 
   // ================= 配置区域 =================
   const maxConcurrentUploads = 3;
@@ -111,6 +114,12 @@
     "showzstore.com": "logo_dataurl_showzstore_v1",
   };
 
+  // ===== Logo 资源映射（通过 @resource 从 GitHub 加载）=====
+  const RESOURCE_LOGOS = {
+    "showzstore.com": "logo_sz",
+    "gundamit.com":   "logo_gd",
+  };
+
   function getCurrentPlatform() {
     const host = window.location.hostname;
     for (const domain of Object.keys(PLATFORM_KEYS)) {
@@ -138,10 +147,19 @@
     const platform = getCurrentPlatform();
     if (_logoCache && _logoCachePlatform === platform) return _logoCache;
 
+    // 优先使用用户通过面板上传的自定义 logo
     const key = getLogoStoreKey();
-    if (!key) return null;
+    let dataUrl = key ? await GM_getValue(key, "") : "";
 
-    const dataUrl = await GM_getValue(key, "");
+    // 如果没有自定义 logo，使用 @resource 预加载的 logo
+    if (!dataUrl && platform && RESOURCE_LOGOS[platform]) {
+      try {
+        dataUrl = GM_getResourceURL(RESOURCE_LOGOS[platform]);
+      } catch (e) {
+        console.error("Resource logo load failed:", e);
+      }
+    }
+
     if (!dataUrl) return null;
     try {
       const img = await loadHtmlImage(dataUrl);
