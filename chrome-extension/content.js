@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "3.5";
+  const SCRIPT_VERSION = "3.7";
 
   // ================= 配置区域 =================
   const maxConcurrentUploads = 3;
@@ -136,6 +136,77 @@
     }
   }
 
+  // ================= 本地保存（水印处理后的图片下载到本地，默认一直开启） =================
+  const ARCHIVE_QUALITY = 0.95;
+
+  function getPlatformPrefix() {
+    const platform = getCurrentPlatform();
+    if (platform === "showzstore.com") return "SZ_";
+    if (platform === "gundamit.com") return "GD_";
+    return "";
+  }
+
+  function saveBlobLocal(blob, name) {
+    try {
+      const finalName = getPlatformPrefix() + name;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = finalName;
+      a.style.display = "none";
+      (document.body || document.documentElement).appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { a.remove(); } catch (_) {}
+        try { URL.revokeObjectURL(url); } catch (_) {}
+      }, 1000);
+      log(`本地保存: ${finalName}`);
+    } catch (e) {
+      log("本地保存失败:", e);
+    }
+  }
+
+  // 原图分辨率 + 水印（用于本地归档，保留原始长宽比和画质）
+  async function renderOriginalWithLogo(file, logoRelWidth) {
+    if ((file.type || "").toLowerCase() === "image/gif") return null;
+    const bitmapOrImg = await loadImageFromFile(file);
+    const srcW = bitmapOrImg.width;
+    const srcH = bitmapOrImg.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = srcW;
+    canvas.height = srcH;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmapOrImg, 0, 0, srcW, srcH);
+
+    const logo = await getLogoImage();
+    if (logo) {
+      const targetLogoW = Math.round(srcW * logoRelWidth);
+      const logoScale = targetLogoW / logo.width;
+      const targetLogoH = Math.round(logo.height * logoScale);
+      const { x, y } = pickLogoAnchor(LOGO_POS, srcW, srcH, targetLogoW, targetLogoH, LOGO_MARGIN);
+      ctx.save();
+      ctx.globalAlpha = LOGO_OPACITY;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(logo, x, y, targetLogoW, targetLogoH);
+      ctx.restore();
+    }
+    return await canvasToBlob(canvas, OUTPUT_MIME, ARCHIVE_QUALITY);
+  }
+
+  async function saveOriginalWithLogoLocal(file, logoRelWidth) {
+    try {
+      const blob = await renderOriginalWithLogo(file, logoRelWidth);
+      if (!blob) return;
+      const base = (file.name || "image").replace(/\.[^.]+$/, "");
+      const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
+      saveBlobLocal(blob, `${base}-orig.${ext}`);
+    } catch (e) {
+      log("本地归档渲染失败:", e);
+    }
+  }
+
   // ===== 图片预处理 =====
   async function preprocessImage(file) {
     if ((file.type || "").toLowerCase() === "image/gif") {
@@ -181,6 +252,8 @@
 
     const blob = await canvasToBlob(canvas, OUTPUT_MIME, OUTPUT_QUALITY);
     if (!blob) return { blob: file, name: file.name };
+
+    await saveOriginalWithLogoLocal(file, LOGO_REL_WIDTH);
 
     const base = (file.name || "image").replace(/\.[^.]+$/, "");
     const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
@@ -233,6 +306,8 @@
 
     const blob = await canvasToBlob(canvas, OUTPUT_MIME, MAIN_IMAGE_QUALITY);
     if (!blob) return { blob: file, name: file.name };
+
+    await saveOriginalWithLogoLocal(file, 0.35);
 
     const base = (file.name || "image").replace(/\.[^.]+$/, "");
     const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";

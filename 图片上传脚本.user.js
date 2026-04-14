@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         图片上传助手 (V3.6 图片缩放+分平台Logo水印+主图水印)
+// @name         图片上传助手 (V3.7 图片缩放+分平台Logo水印+主图水印+本地保存)
 // @namespace    http://tampermonkey.net/
-// @version      3.6
-// @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印
+// @version      3.7
+// @description  上传图片前统一缩放到850宽并叠加Logo水印 + Alt/Title注入 + 主图上传自动水印 + 可选本地保存
 // @author       You
 // @match        https://*.gundamit.com/manage/?m=products&a=products&d=edit*
 // @match        https://*.showzstore.com/manage/?m=products&a=products&d=edit*
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "3.6";
+  const SCRIPT_VERSION = "3.7";
 
   // ================= 配置区域 =================
   const maxConcurrentUploads = 3;
@@ -211,6 +211,98 @@
     GM_registerMenuCommand(`设置Logo - ${label}`, pickLogoFileAndSave);
   } catch (e) {}
 
+  // ================= 本地保存（水印处理后的图片下载到本地） =================
+  const SAVE_LOCAL_KEY = "save_local_enabled";
+
+  async function isSaveLocalEnabled() {
+    try {
+      return (await GM_getValue(SAVE_LOCAL_KEY, false)) === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getPlatformPrefix() {
+    const platform = getCurrentPlatform();
+    if (platform === "showzstore.com") return "SZ_";
+    if (platform === "gundamit.com") return "GD_";
+    return "";
+  }
+
+  async function saveBlobLocal(blob, name) {
+    if (!(await isSaveLocalEnabled())) return;
+    try {
+      const prefix = getPlatformPrefix();
+      const finalName = prefix + name;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = finalName;
+      a.style.display = "none";
+      (document.body || document.documentElement).appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { a.remove(); } catch (_) {}
+        try { URL.revokeObjectURL(url); } catch (_) {}
+      }, 1000);
+      log(`本地保存: ${finalName}`);
+    } catch (e) {
+      log("本地保存失败:", e);
+    }
+  }
+
+  // 原图分辨率 + 水印（用于本地归档，保留原始长宽比和画质）
+  const ARCHIVE_QUALITY = 0.95;
+
+  async function renderOriginalWithLogo(file, logoRelWidth) {
+    if ((file.type || "").toLowerCase() === "image/gif") return null;
+    const bitmapOrImg = await loadImageFromFile(file);
+    const srcW = bitmapOrImg.width;
+    const srcH = bitmapOrImg.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = srcW;
+    canvas.height = srcH;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmapOrImg, 0, 0, srcW, srcH);
+
+    const logo = await getLogoImage();
+    if (logo) {
+      const targetLogoW = Math.round(srcW * logoRelWidth);
+      const logoScale = targetLogoW / logo.width;
+      const targetLogoH = Math.round(logo.height * logoScale);
+      const { x, y } = pickLogoAnchor(LOGO_POS, srcW, srcH, targetLogoW, targetLogoH, LOGO_MARGIN);
+      ctx.save();
+      ctx.globalAlpha = LOGO_OPACITY;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(logo, x, y, targetLogoW, targetLogoH);
+      ctx.restore();
+    }
+    return await canvasToBlob(canvas, OUTPUT_MIME, ARCHIVE_QUALITY);
+  }
+
+  async function saveOriginalWithLogoLocal(file, logoRelWidth) {
+    if (!(await isSaveLocalEnabled())) return;
+    try {
+      const blob = await renderOriginalWithLogo(file, logoRelWidth);
+      if (!blob) return;
+      const base = (file.name || "image").replace(/\.[^.]+$/, "");
+      const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
+      await saveBlobLocal(blob, `${base}-orig.${ext}`);
+    } catch (e) {
+      log("本地归档渲染失败:", e);
+    }
+  }
+
+  try {
+    GM_registerMenuCommand("切换本地保存 (开/关)", async () => {
+      const cur = await isSaveLocalEnabled();
+      await GM_setValue(SAVE_LOCAL_KEY, !cur);
+      alert(`本地保存已${!cur ? "开启" : "关闭"}\n（水印处理后的图片将${!cur ? "自动下载到浏览器默认下载目录" : "不再下载"}）`);
+    });
+  } catch (e) {}
+
   async function preprocessImage(file) {
     if ((file.type || "").toLowerCase() === "image/gif") {
       return { blob: file, name: file.name };
@@ -258,7 +350,9 @@
 
     const base = (file.name || "image").replace(/\.[^.]+$/, "");
     const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
-    return { blob, name: `${base}-w${IMAGE_MAX_WIDTH}.${ext}` };
+    const outName = `${base}-w${IMAGE_MAX_WIDTH}.${ext}`;
+    await saveOriginalWithLogoLocal(file, LOGO_REL_WIDTH);
+    return { blob, name: outName };
   }
 
   // ===== 主图专用预处理：强制正方形 + 水印 =====
@@ -310,7 +404,9 @@
 
     const base = (file.name || "image").replace(/\.[^.]+$/, "");
     const ext = OUTPUT_MIME === "image/png" ? "png" : "jpg";
-    return { blob, name: `${base}-sq${squareSize}.${ext}` };
+    const outName = `${base}-sq${squareSize}.${ext}`;
+    await saveOriginalWithLogoLocal(file, 0.35);
+    return { blob, name: outName };
   }
 
   // ================= iframe 模式：仅 hook 主图上传 iframe 的 XHR =================

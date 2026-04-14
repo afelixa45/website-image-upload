@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "图片上传助手",
-  "version": "3.5",
-  "description": "ShowzStore/GundamIT 后台图片上传前自动缩放+Logo水印+Alt/Title注入+主图正方形处理",
+  "version": "3.7",
+  "description": "ShowzStore/GundamIT 后台图片上传前自动缩放+Logo水印+Alt/Title注入+主图正方形处理+可选本地高清归档",
   "permissions": [],
   "content_scripts": [
     {
