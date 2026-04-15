@@ -51,4 +51,4 @@ Tampermonkey 油猴脚本，用于电商网站商品图片的批量上传。
 |------|------|
 | `图片上传脚本.user.js` | Tampermonkey 当前版本（V3.7） |
 | `图片上传脚本-v1.5-初始版.user.js` | 初始版本存档 |
-| `chrome-extension/` | Chrome 插件版（V3.7，功能与 Tampermonkey 对齐） |
+| `网站图片上传插件/` | Chrome 插件版（V3.7，功能与 Tampermonkey 对齐） |

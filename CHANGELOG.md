@@ -26,7 +26,7 @@
 - 脚本从 270KB 缩回 19KB
 
 ### Added
-- Chrome 插件版本（chrome-extension/）：Manifest V3，MAIN world，CKEditor 支持
+- Chrome 插件版本（网站图片上传插件/，原名 chrome-extension/，v3.7 重命名）：Manifest V3，MAIN world，CKEditor 支持
 
 ## [3.5] - 2026-04-08
 
